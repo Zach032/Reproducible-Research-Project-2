@@ -1,0 +1,121 @@
+---
+title: "Anaylsis of Impact of Major Storms and Weather Events"
+author: "Zach Valadez"
+date: "July 1, 2018"
+output: html_document
+---
+
+## Sympnosis
+The goal of this anaylsis is to exlore the effect of severe storms and weather events in an area by using
+NOAA storm database, which covers events from 1950 and end in November 2011.  
+We will look at how these storms and weather events have effected  
+1. Fatalities and injuries  
+2. Property and crops damage
+[NOAA storm Data](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2)
+
+## Data Processing
+### Loading Data
+We will first download the data we want to observe then make it into a data table to make it easier
+to work with.
+```{r}
+library(data.table)
+library(ggplot2)
+
+url <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+download.file(url, paste0(getwd(),"/repdata%2Fdata%2FStormData.csv.bz2"))
+stormDF <- read.csv(paste0(getwd(),"/repdata%2Fdata%2FStormData.csv.bz2"))
+
+stormDT <- as.data.table(stormDF)
+```
+### Looking at Column Names
+```{r}
+colnames(stormDT)
+```
+### Subsetting Data
+We now are going to subset the data and take out only what we are interested in.
+```{r}
+colsRemoved <- colnames(stormDT[, !c("EVTYPE", "FATALITIES", "INJURIES", "PROPDMG", "PROPDMGEXP", 
+                                     "CROPDMG", "CROPDMGEXP")])
+
+stormDT[, c(colsRemoved) := NULL]
+
+stormDT <- stormDT[(EVTYPE != "?" & (INJURIES > 0 | FATALITIES > 0 | PROPDMG > 0 | CROPDMG > 0)), 
+                   c("EVTYPE", "FATALITIES", "INJURIES", "PROPDMG", "PROPDMGEXP","CROPDMG", "CROPDMGEXP")]
+
+```
+
+### Converting Exponents Columns into Actual Exponents
+Right now in our data table our exponent column is made up on different characters and not real expontents.
+This is true for exponent columns for PROPDMGEXP and CROPDMGEXP. This will help these columns look cleaner
+as well as to be used to calculate property crop damage cost.
+```{r}
+propDmgKey <- c("\"\"" = 10^0, "-" = 10^0, "+" = 10^0,"0" = 10^0,"1" = 10^1,"2" = 10^2,"3" = 10^3,
+                "4" = 10^4,"5" = 10^5,"6" = 10^6,"7" = 10^7,"8" = 10^8,"9" = 10^9,"H" = 10^2,"K" = 10^3,
+                 "M" = 10^6,"B" = 10^9)
+
+cropDmgKey <- c("\"\"" = 10^0,"?" = 10^0, "0" = 10^0,"K" = 10^3,"M" = 10^6,"B" = 10^9)
+
+stormDT[, PROPDMGEXP := propDmgKey[as.character(stormDT[,PROPDMGEXP])]]
+stormDT[is.na(PROPDMGEXP), PROPDMGEXP := 10^0]
+
+stormDT[, CROPDMGEXP := cropDmgKey[as.character(stormDT[,CROPDMGEXP])]]
+stormDT[is.na(CROPDMGEXP), CROPDMGEXP := 10^0]
+```
+### Creating Cost Columns for Property and Crops
+```{r}
+stormDT <- stormDT[, .(EVTYPE, FATALITIES, INJURIES, PROPDMG, PROPDMGEXP, propCost = PROPDMG * PROPDMGEXP,
+                       CROPDMG, CROPDMGEXP, cropCost = CROPDMG * CROPDMGEXP)]
+```
+
+### Total Property and Crop Damage Cost
+```{r}
+totalCostDT <- stormDT[, .(propCost = sum(propCost), cropCost = sum(cropCost), 
+                         total_cost = sum(propCost) + sum(cropCost)), by = .(EVTYPE)]
+totalCostDT <- totalCostDT[order(-total_cost),]
+totalCostDT <- totalCostDT[1:10, ]
+head(totalCostDT, 5)
+```
+
+### Total Number of FATALITIES and Injuries
+```{r}
+totalInjuriesDT <- stormDT[, .(FATALITIES = sum(FATALITIES), INJURIES = sum(INJURIES), 
+                         total_injuries = sum(FATALITIES) + sum(INJURIES)), by = .(EVTYPE)]
+totalInjuriesDT <- totalInjuriesDT[order(-total_injuries),]
+totalInjuriesDT <- totalInjuriesDT[1:10, ]
+head(totalInjuriesDT, 5)
+```
+
+## Results
+### Events that caused the most injuries
+First we will create a data table to help create a plot
+```{r}
+harmfulEvent <- melt(totalInjuriesDT, id.vars = "EVTYPE", variable.name = "harmfulThing")
+head(harmfulEvent, 5)
+```
+
+Now we are going to make our plot.
+```{r}
+healthPlot <- ggplot(harmfulEvent, aes(x = reorder(EVTYPE, -value), y = value))
+healthPlot = healthPlot + geom_bar(stat = "identity", aes(fill = harmfulThing), position = "dodge") +
+    labs(title = "Most Harmful Storms in the US", xlabs = "Event Type", ylabs = "Frequency Count") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.title = element_text(hjust = 0.5))
+healthPlot
+```
+
+### Events that caused the most damage
+First we will create a data table to help create a plot once again
+```{r}
+destructiveEvent <- melt(totalCostDT, id.vars = "EVTYPE", variable.name = "destructiveThing")
+head(destructiveEvent, 5)
+```
+
+Now we are going to make our plot.
+```{r}
+costPlot <- ggplot(destructiveEvent, aes(x = reorder(EVTYPE, -value), y = value))
+costPlot = costPlot + geom_bar(stat = "identity", aes(fill = destructiveThing), position = "dodge") +
+    labs(title = "Most Destructive Storms in the US", xlabs = "Event Type", ylabs = "Cost (dollars)") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.title = element_text(hjust = 0.5))
+costPlot
+```
+
+
